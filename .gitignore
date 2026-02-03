@@ -4,9 +4,5 @@ lib/
 include/
 .idea/
 *.pyc
-bin/
-lib/
-include/
-.idea/
 pyvenv.cfg
 .env
