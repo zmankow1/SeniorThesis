@@ -11,8 +11,11 @@ INPUT_CSV = os.path.join(script_dir, "..", "data", "processed_data", "master_cor
 OUTPUT_JSON = os.path.join(script_dir, "..", "data", "annotations", "gold_standard_training.json")
 
 SAMPLE_SIZE = 2000
-API_KEY = "AIzaSyDI5BWrRa4gRoQdhCcdDBLIFn2aWdOKdWs"  # Paste your key here
+# scripts/gemini_labeler.py
+API_KEY = os.getenv("GEMINI_API_KEY")
 
+if not API_KEY:
+    raise ValueError("❌ Error: GEMINI_API_KEY not found in environment variables.")
 
 def is_metadata(text):
     """Skips Table of Contents and Chapter lists which confuse the AI."""
