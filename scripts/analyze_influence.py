@@ -5,11 +5,13 @@ import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 import numpy as np
+from collections import Counter
 
 # --- CONFIGURATION ---
-# dynamically find the path relative to this script file
+# Dynamically find the path relative to this script file
 script_dir = os.path.dirname(os.path.abspath(__file__))
-INPUT_DIR = os.path.join(script_dir, "../data/corpus_txt/")
+INPUT_DIR = os.path.join(script_dir, "..", "data", "corpus_txt")
+RESULTS_DIR = os.path.join(script_dir, "..", "data", "results")
 
 SPACY_MODEL = "en_core_web_lg"
 
@@ -33,48 +35,46 @@ CORPORA = {
 
 
 def load_and_clean_corpus(nlp):
-    """Reads files and returns a dictionary of clean text lists."""
+    """
+    Reads files, CLEANS them, and CHUNKS them into smaller segments
+    so LDA has enough data to learn.
+    """
     data = {"Tolkien (Root)": [], "Successors (80s/90s)": [], "Modern (Deconstruction)": []}
-
-    # Invert dictionary for easy lookup
     file_map = {}
     for group, files in CORPORA.items():
-        for f in files:
-            file_map[f] = group
+        for f in files: file_map[f] = group
 
-    print("📖 Loading and cleaning corpus (Advanced Filtering)...")
+    print("📖 Loading, Cleaning, and Chunking corpus...")
+
     for filepath in glob.glob(os.path.join(INPUT_DIR, "*.txt")):
         filename = os.path.basename(filepath)
         group = file_map.get(filename)
-
-        if not group:
-            continue
+        if not group: continue
 
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
 
-        # Increase limit for large books
+        # 1. Process the whole book (Limit to 2MB to keep it fast but substantial)
         nlp.max_length = len(text) + 100000
+        doc = nlp(text[:2000000])
 
-        # SLICING: We still slice to 1MB for speed, but you can remove [:1000000] for final run
-        doc = nlp(text[:1000000])
-
-        # --- THE FIX IS HERE ---
-        # 1. POS Tagging: Keep only NOUNS (sword), ADJECTIVES (dark), and PROPN (optional)
-        # 2. Filtering: Remove specific names if you want to measure 'Genre' vs 'Character'
-        #    (We keep PROPN here to catch 'Gondor', but you might want to exclude them later)
+        # 2. Extract meaningful words
         tokens = []
         for token in doc:
-            if token.is_stop or not token.is_alpha:
-                continue
-
-            # Keep only descriptive world-building words
+            if token.is_stop or not token.is_alpha: continue
+            # Keep NOUNS and ADJECTIVES for World Building context
             if token.pos_ in ['NOUN', 'ADJ']:
                 tokens.append(token.lemma_.lower())
 
-        clean_text = " ".join(tokens)
-        data[group].append(clean_text)
-        print(f"   ✅ Processed {filename} ({len(tokens)} nouns/adjectives)")
+        # 3. THE FIX: Slice list of tokens into 2,000-word chunks
+        CHUNK_SIZE = 2000
+        for i in range(0, len(tokens), CHUNK_SIZE):
+            chunk = tokens[i:i + CHUNK_SIZE]
+            # Only keep chunks that are substantial (ignore tiny end bits)
+            if len(chunk) > 500:
+                data[group].append(" ".join(chunk))
+
+        print(f"   ✅ Processed {filename} -> {len(tokens) // CHUNK_SIZE} chunks")
 
     return data
 
@@ -96,7 +96,6 @@ def calculate_lexical_diffusion(data):
     results = []
 
     # 2. Project other corpora onto this vocabulary
-    # We use a CountVectorizer fixed to Tolkien's vocabulary to count raw frequencies
     counter = CountVectorizer(vocabulary=feature_names)
 
     for group, texts in data.items():
@@ -104,65 +103,153 @@ def calculate_lexical_diffusion(data):
 
         # Transform texts into the "Tolkien Vector Space"
         matrix = counter.transform(texts)
-        # Sum counts of Tolkien words per book, normalize by book length
         total_tolkien_words = matrix.sum(axis=1)
 
-        # We average the "Tolkien Density" for the group
-        # (This is a simplified density score)
+        # Average the "Tolkien Density" for the group
         avg_density = np.mean(total_tolkien_words)
         results.append({"Corpus": group, "Lexical Diffusion Score": avg_density})
 
     return pd.DataFrame(results)
 
 
-def calculate_thematic_divergence(data):
+def calculate_thematic_divergence(lda_model, vectorizer, data):
     """
-    1. Trains LDA Topic Model on Tolkien.
-    2. Calculates 'Perplexity' (Confusion) of that model on other books.
+    Calculates 'Perplexity' (Confusion) of the Tolkien model on other books.
     Higher Perplexity = The Topic Model doesn't understand the new book (Divergence).
     """
     print("\n🧠 Calculating Thematic Divergence (LDA Perplexity)...")
-
-    # 1. Train LDA on Tolkien
-    vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
-    dtm_tolkien = vectorizer.fit_transform(data["Tolkien (Root)"])
-
-    lda = LatentDirichletAllocation(n_components=5, random_state=42)
-    lda.fit(dtm_tolkien)
-
     results = []
 
     for group, texts in data.items():
         if not texts: continue
 
         dtm_group = vectorizer.transform(texts)
-        # Perplexity: Lower is better (good fit). Higher is worse (divergence).
-        # We normalize by log length to make it somewhat comparable
-        perplexity = lda.perplexity(dtm_group)
+        perplexity = lda_model.perplexity(dtm_group)
 
         results.append({"Corpus": group, "Thematic Divergence (Perplexity)": perplexity})
 
     return pd.DataFrame(results)
 
 
+def analyze_topic_distribution(lda_model, vectorizer, data):
+    """
+    Shows WHICH Tolkien topics survived in the other books.
+    """
+    print("\n📊 Analyzing Topic Fingerprints...")
+
+    # 1. Print what the Topics actually ARE
+    feature_names = vectorizer.get_feature_names_out()
+    print("   Tolkien's Thematic Pillars:")
+    for topic_idx, topic in enumerate(lda_model.components_):
+        top_words = [feature_names[i] for i in topic.argsort()[:-6:-1]]
+        print(f"   Topic {topic_idx + 1}: {', '.join(top_words)}")
+
+    results = []
+
+    # 2. Project each corpus onto these topics
+    for group, texts in data.items():
+        if not texts: continue
+
+        dtm = vectorizer.transform(texts)
+        topic_dist = lda_model.transform(dtm)
+        avg_dist = np.mean(topic_dist, axis=0)
+
+        row = {"Corpus": group}
+        for i, val in enumerate(avg_dist):
+            row[f"Topic {i + 1} Share"] = val
+        results.append(row)
+
+    return pd.DataFrame(results)
+
+
+def analyze_archetype_context(nlp, data, target_word="sword"):
+    """
+    Checks what adjectives describe a specific archetype in each corpus.
+    """
+    print(f"\n👑 Analyzing Semantic Context for '{target_word}'...")
+    results = []
+
+    for group, texts in data.items():
+        adjectives = []
+        for text in texts:
+            # We process a snippet to save time.
+            # Ideally, use the original raw text, but here we scan the lemma list roughly.
+            # For accurate context, we re-process a chunk of raw text:
+            doc = nlp(text[:500000])
+
+            for token in doc:
+                if token.lemma_.lower() == target_word:
+                    for child in token.children:
+                        if child.pos_ == "ADJ":
+                            adjectives.append(child.lemma_.lower())
+
+        common = Counter(adjectives).most_common(3)
+        desc_str = ", ".join([f"{w} ({c})" for w, c in common])
+        results.append({"Corpus": group, f"'{target_word}' Descriptors": desc_str})
+
+    return pd.DataFrame(results)
+
+
 if __name__ == "__main__":
+    # Ensure results folder exists
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
+    print("⏳ Loading spaCy model...")
     nlp = spacy.load(SPACY_MODEL)
 
     # 1. Load Data
     corpus_data = load_and_clean_corpus(nlp)
 
-    # 2. Run Analyses
-    lexical_df = calculate_lexical_diffusion(corpus_data)
-    thematic_df = calculate_thematic_divergence(corpus_data)
+    # 2. Prepare Models (Train on Tolkien)
+    # min_df=0.2 means a word must appear in 20% of documents to be a "theme"
+    # This filters out "Jester" or one-off scene words.
+    vectorizer = CountVectorizer(max_df=0.95, min_df=0.2, stop_words='english')
+    dtm_tolkien = vectorizer.fit_transform(corpus_data["Tolkien (Root)"])
 
-    # 3. Merge and Display
+    lda = LatentDirichletAllocation(n_components=5, random_state=42)
+    lda.fit(dtm_tolkien)
+
+    # 3. Run All Analyses
+    lexical_df = calculate_lexical_diffusion(corpus_data)
+    thematic_df = calculate_thematic_divergence(lda, vectorizer, corpus_data)
+    topic_dist_df = analyze_topic_distribution(lda, vectorizer, corpus_data)
+
+    # 4. Run Semantic Shift on Multiple Archetypes
+    target_words = ["sword", "king", "magic", "shadow", "stone"]
+
+    all_shifts = []
+    for word in target_words:
+        print(f"   ...analyzing '{word}'")
+        df = analyze_archetype_context(nlp, corpus_data, target_word=word)
+        # Add a column to track which word this is
+        df.insert(0, "Archetype", word)
+        all_shifts.append(df)
+
+    # Combine into one big table
+    master_shift_df = pd.concat(all_shifts)
+
+    # 5. Merge and Save
     final_df = pd.merge(lexical_df, thematic_df, on="Corpus")
 
     print("\n" + "=" * 60)
-    print("RESULTS: QUANTIFYING LITERARY INFLUENCE")
+    print("RESULTS 1: QUANTIFYING INFLUENCE")
     print("=" * 60)
     print(final_df.to_string(index=False))
 
-    # Save for thesis
-    os.makedirs("../data/results", exist_ok=True)
-    final_df.to_csv("../data/results/influence_metrics.csv", index=False)
+    print("\n" + "=" * 60)
+    print("RESULTS 2: TOPIC DISTRIBUTION (Thematic Architecture)")
+    print("=" * 60)
+    print(topic_dist_df.to_string(index=False))
+
+    print("\n" + "=" * 60)
+    print("RESULTS 3: SEMANTIC SHIFT (The Deconstruction)")
+    print("=" * 60)
+    # Group by Archetype for cleaner reading
+    print(master_shift_df.sort_values(by=["Archetype", "Corpus"]).to_string(index=False))
+
+    # Save to CSV
+    final_df.to_csv(os.path.join(RESULTS_DIR, "influence_metrics.csv"), index=False)
+    topic_dist_df.to_csv(os.path.join(RESULTS_DIR, "topic_distribution.csv"), index=False)
+    master_shift_df.to_csv(os.path.join(RESULTS_DIR, "semantic_shift_master.csv"), index=False)
+
+    print(f"\n✅ All reports saved to: {RESULTS_DIR}")

@@ -1,0 +1,16 @@
+Archetype,Corpus,'sword' Descriptors,'king' Descriptors,'magic' Descriptors,'shadow' Descriptors,'stone' Descriptors
+sword,Tolkien (Root),"hilt (8), small (7), bright (6)",,,,
+sword,Successors (80s/90s),"great (17), hilt (11), short (10)",,,,
+sword,Modern (Deconstruction),"wooden (14), hilt (8), good (6)",,,,
+king,Tolkien (Root),,"great (17), old (13), high (7)",,,
+king,Successors (80s/90s),,"ancient (4), great (3), foolish (2)",,,
+king,Modern (Deconstruction),,"old (12), good (11), true (10)",,,
+magic,Tolkien (Root),,,"magic (1), hot (1)",,
+magic,Successors (80s/90s),,,,,
+magic,Modern (Deconstruction),,,"beautiful (1), little (1), royal (1)",,
+shadow,Tolkien (Root),,,,"black (19), dark (19), great (12)",
+shadow,Successors (80s/90s),,,,"deep (11), black (10), gray (7)",
+shadow,Modern (Deconstruction),,,,"quiet (6), light (5), long (5)",
+stone,Tolkien (Root),,,,,"great (5), black (4), white (4)"
+stone,Successors (80s/90s),,,,,"blue (8), small (5), white (4)"
+stone,Modern (Deconstruction),,,,,"cold (5), small (4), red (4)"
