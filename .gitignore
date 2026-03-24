@@ -4,5 +4,8 @@ lib/
 include/
 .idea/
 *.pyc
+__pycache__/
+.pytest_cache/
 pyvenv.cfg
 .env
+.DS_Store
